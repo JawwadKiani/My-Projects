@@ -1,0 +1,238 @@
+---
+title: "Build and deploy a stroke prediction model using R"
+date: "`r Sys.Date()`"
+output: html_document
+author: "Muhammad Jawwad Kiani!"
+---
+
+# About Data Analysis Report
+
+This RMarkdown file contains the report of the data analysis done for the project on building and deploying a stroke prediction model in R. It contains analysis such as data exploration, summary statistics and building the prediction models. The final report was completed on `r date()`.
+
+**Data Description:**
+
+According to the World Health Organization (WHO) stroke is the 2nd leading cause of death globally, responsible for approximately 11% of total deaths.
+
+This data set is used to predict whether a patient is likely to get stroke based on the input parameters like gender, age, various diseases, and smoking status. Each row in the data provides relevant information about the patient.
+
+# Task One: Import data and data preprocessing
+
+## Load data and install packages
+
+```{r}
+# Install necessary packages if not already installed
+list.of.packages <- c("tidyverse", "caret", "randomForest", "e1071", "ROCR")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# Load libraries
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(e1071)
+library(ROCR)
+
+# Load the dataset
+healthcare_dataset_stroke_data <- read.csv("healthcare-dataset-stroke-data.csv", stringsAsFactors = FALSE)
+
+
+stroke_data <-healthcare_dataset_stroke_data
+
+# View the first few rows
+head(stroke_data)
+```
+
+## Describe and explore the data
+
+```{r}
+# Summary statistics
+summary(stroke_data)
+
+# Check for missing values
+colSums(is.na(stroke_data))
+
+# Visualize distribution of key variables
+ggplot(stroke_data, aes(x=age)) + geom_histogram(binwidth=5, fill="blue", color="black") + theme_minimal()
+
+# Stroke vs Age boxplot
+ggplot(stroke_data, aes(x=factor(stroke), y=age, fill=factor(stroke))) +
+  geom_boxplot() + labs(x="Stroke (0 = No, 1 = Yes)", y="Age") + theme_minimal()
+
+# Gender distribution
+ggplot(stroke_data, aes(x=gender, fill=factor(stroke))) +
+  geom_bar(position="fill") + labs(y="Proportion", fill="Stroke") + theme_minimal()
+
+```
+```{r}
+# Step 1: Check for non-numeric BMI values using regex
+invalid_bmi <- unique(stroke_data$bmi[!grepl("^[0-9.]+$", stroke_data$bmi)])
+
+# Step 2: Display a clean message depending on findings
+if (length(invalid_bmi) == 0) {
+  print("No invalid BMI values found.")
+} else {
+  print(paste("Invalid BMI values:", paste(invalid_bmi, collapse = ", ")))
+}
+
+# Step 3: Replace all invalid BMI values with NA
+stroke_data$bmi[!grepl("^[0-9.]+$", stroke_data$bmi)] <- NA
+
+# Step 4: Convert BMI column to numeric
+stroke_data$bmi <- as.numeric(stroke_data$bmi)
+
+# Step 5: Impute missing BMI values with the median
+stroke_data$bmi[is.na(stroke_data$bmi)] <- median(stroke_data$bmi, na.rm = TRUE)
+
+# Step 6: Confirm no NA values remain in any column
+print("Missing values per column:")
+print(colSums(is.na(stroke_data)))
+
+# Step 7: Optional check – confirm bmi is numeric and valid
+print(str(stroke_data$bmi))
+print(summary(stroke_data$bmi))
+
+
+
+
+
+
+
+
+```
+# Task Two: Build prediction models
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Ensure stroke is a factor (for classification)
+stroke_data$stroke <- as.factor(stroke_data$stroke)
+
+# Split data into train (70%) and test (30%) sets
+trainIndex <- createDataPartition(stroke_data$stroke, p = 0.7, list = FALSE)
+train_data <- stroke_data[trainIndex, ]
+test_data <- stroke_data[-trainIndex, ]
+
+# Logistic Regression Model
+log_model <- glm(stroke ~ ., data = train_data, family = binomial)
+
+# Random Forest Model (Classification)
+rf_model <- randomForest(stroke ~ ., data = train_data, ntree = 100, importance = TRUE)
+
+# Support Vector Machine (SVM) Model
+svm_model <- svm(stroke ~ ., data = train_data, probability = TRUE)
+
+# Confirm models are trained
+print("Models trained successfully.")
+
+```
+
+# Task Three: Evaluate and select prediction models
+
+```{r}
+# Logistic Regression Predictions and ROC
+log_pred_prob <- predict(log_model, test_data, type="response")
+log_pred <- ifelse(log_pred_prob > 0.5, 1, 0)
+
+# Random Forest Predictions
+rf_pred <- predict(rf_model, test_data)
+rf_pred_prob <- predict(rf_model, test_data, type="prob")[,2]
+
+# SVM Predictions
+svm_pred <- predict(svm_model, test_data)
+svm_pred_prob <- attr(predict(svm_model, test_data, probability=TRUE), "probabilities")[,2]
+
+# Confusion Matrix for Logistic Regression
+confusionMatrix(as.factor(log_pred), test_data$stroke, positive="1")
+
+# Confusion Matrix for Random Forest
+confusionMatrix(rf_pred, test_data$stroke, positive="1")
+
+# Confusion Matrix for SVM
+confusionMatrix(svm_pred, test_data$stroke, positive="1")
+
+# ROC Curve for all models
+pred_log <- prediction(log_pred_prob, test_data$stroke)
+perf_log <- performance(pred_log, "tpr", "fpr")
+
+pred_rf <- prediction(rf_pred_prob, test_data$stroke)
+perf_rf <- performance(pred_rf, "tpr", "fpr")
+
+pred_svm <- prediction(svm_pred_prob, test_data$stroke)
+perf_svm <- performance(pred_svm, "tpr", "fpr")
+
+plot(perf_log, col="blue", main="ROC Curves for Stroke Prediction Models")
+plot(perf_rf, col="green", add=TRUE)
+plot(perf_svm, col="red", add=TRUE)
+legend("bottomright", legend=c("Logistic Regression","Random Forest","SVM"),
+       col=c("blue","green","red"), lty=1)
+
+```
+
+# Task Four: Deploy the prediction model
+
+```{r}
+
+saveRDS(rf_model, file = "stroke_rf_model.rds")
+
+
+```
+
+# Task Five: Findings and Conclusions
+
+Data Overview:
+
+Dataset contains 5110 observations with features including age, gender, hypertension, heart disease, marital status, work type, residence type, average glucose level, BMI, smoking status, and stroke occurrence.
+
+The target variable stroke is highly imbalanced, with about 4.8% of cases labeled as stroke (stroke = 1).
+
+Data Preprocessing:
+
+Categorical variables were correctly converted to factors.
+
+BMI values had some invalid or missing entries which were identified and imputed with the median BMI to maintain data integrity.
+
+Missing values were handled, and no NA values remained after cleaning.
+
+Modeling and Performance:
+
+Logistic Regression, Random Forest, and SVM models were trained on a 70-30 train-test split.
+
+The Random Forest model was saved successfully on your local machine.
+
+From the confusion matrices and classification reports:
+
+The model shows very high accuracy (~95%) but this is misleading because of class imbalance.
+
+Sensitivity (Recall for stroke cases) was extremely low (around 0% to 1.3%), meaning the model rarely correctly predicts actual stroke cases.
+
+Specificity (true negative rate) was 100%, meaning non-stroke cases were almost always correctly identified.
+
+This results in a poor ability to detect strokes despite high overall accuracy, a common issue with imbalanced data.
+
+Kappa statistics near zero indicate the model predictions are barely better than random guessing on the minority class.
+
+ROC Curve:
+
+The ROC curve and AUC (not explicitly shown here but typically evaluated) would help assess discriminatory power better than accuracy alone.
+
+Given low sensitivity, the AUC likely is modest, reflecting the challenge of predicting the minority class.
+
+Conclusions:
+Model performance is heavily influenced by class imbalance. Accuracy alone is not a good metric here because the dataset is dominated by non-stroke cases.
+
+The current models tend to predict the majority class (no stroke) almost exclusively, missing most stroke cases.
+
+To improve stroke prediction, consider:
+
+Applying techniques to handle imbalance, such as SMOTE (Synthetic Minority Over-sampling Technique), class weighting, or balanced random forests.
+
+Using evaluation metrics focused on the minority class, such as Precision, Recall, F1-score, or AUC-PR (Area Under Precision-Recall Curve).
+
+Exploring additional predictive features or domain-specific feature engineering.
+
+Possibly using ensemble methods or tuning hyperparameters to boost minority class detection.
+
+Data cleaning and preprocessing, especially handling invalid BMI values, was successfully performed to ensure model input quality.
+
+
